@@ -2,483 +2,19 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle, Circle
 import uuid
+import sys
+import os
+import time  # For animation timing
 
-def calculate_bar_system(a, b, forces, distributed_loads, E, R, allowable_disp):
-    """
-    Calculate all parameters for the bar system with multiple forces and distributed loads
-    
-    Parameters:
-    - a, b: geometry parameters (m)
-    - forces: list of dicts, each with 'value', 'x_pos', 'y_pos' keys
-    - distributed_loads: list of dicts, each with 'value', 'start_pos', 'end_pos' 'type' keys
-    - E: Young's modulus (GPa)
-    - R: Design resistance (MPa)
-    - allowable_disp: Allowable displacement (mm)
-    """
-    results = {}
-    
-    # Calculate lengths and angles
-    l1 = 2 * b
-    l2 = np.sqrt((2*a)**2 + b**2)  # Using Pythagorean theorem
-    sin_alpha = b / l2
-    cos_alpha = 2*a / l2
-    
-    results['l1'] = l1
-    results['l2'] = l2
-    results['sin_alpha'] = sin_alpha
-    results['cos_alpha'] = cos_alpha
-    
-    # Step 1: Forces in bar 1 (from moment equilibrium around A)
-    # Sum the moment contributions from all loads
-    moment_from_forces = 0
-    for force in forces:
-        if force['y_pos'] > 0:  # Force is above the x-axis
-            direction = force.get('direction', [0, -1])
-            fx = force['value'] * direction[0]
-            fy = force['value'] * direction[1]
-            
-            # Moment = vertical component × horizontal distance - horizontal component × vertical distance
-            moment_from_forces += (fy * force['x_pos'] - fx * force['y_pos'])
-    
-    moment_from_distributed_loads = 0
-    for load in distributed_loads:
-        if load['type'] == 'q1':  # Load on CD segment
-            # Equivalent force at the middle of the segment
-            equiv_force = load['value'] * (2 * a)
-            moment_arm = a
-            moment_from_distributed_loads += equiv_force * moment_arm
-            
-    # From moment equilibrium: N1 * a - moment_from_forces - moment_from_distributed_loads = 0
-    N1 = (moment_from_forces + moment_from_distributed_loads) / a
-    
-    results['N1'] = N1
-    results['N1_tension'] = N1 > 0
-    
-    # Step 2: Support reactions at A
-    # Sum vertical forces: Ya + N1 - sum of vertical forces - sum of distributed loads = 0
-    sum_vertical_forces = sum(force['value'] * force.get('direction', [0, -1])[1] 
-                         for force in forces if force['y_pos'] > 0)
-    sum_distributed_q1 = sum(load['value'] * (2*a) for load in distributed_loads if load['type'] == 'q1')
+# Add the project root to the Python path if needed
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-    # Calculate horizontal reaction at A (needed for complete equilibrium)
-    sum_horizontal_forces = sum(force['value'] * force.get('direction', [0, -1])[0] 
-                           for force in forces)
-    Xa = -sum_horizontal_forces  # Horizontal reaction at support A
-    results['Xa'] = Xa
-
-    Ya = sum_vertical_forces + sum_distributed_q1 - N1
-    results['Ya'] = Ya
-    
-    # Step 3: Forces in bar 2
-    # From moment equilibrium around B for element II
-    moment_B_from_forces = 0
-    for force in forces:
-        if force['x_pos'] < 2*a:  # Force before point B
-            direction = force.get('direction', [0, -1])
-            fx = force['value'] * direction[0]
-            fy = force['value'] * direction[1]
-            
-            # Vertical component creates moment around B
-            moment_B_from_forces += fy * (2*a - force['x_pos'])
-            
-            # If the force has a horizontal component and is not at y=0
-            if fx != 0 and force['y_pos'] > 0:
-                moment_B_from_forces -= fx * force['y_pos']
-    
-    moment_B_from_distributed_loads = 0
-    for load in distributed_loads:
-        if load['type'] == 'q1':
-            equiv_force = load['value'] * (2*a)
-            moment_arm = a  # Distance from the middle of CD to B horizontally
-            moment_B_from_distributed_loads += equiv_force * moment_arm
-        elif load['type'] == 'q2':
-            equiv_force = load['value'] * (2*a)
-            moment_arm = a  # Distance from the middle of DB to B horizontally
-            moment_B_from_distributed_loads += equiv_force * moment_arm
-    
-    # From moment equilibrium: N2 * sin_alpha * (2*a) - moment_B_from_forces - moment_B_from_distributed_loads + N1 * (2*a) = 0
-    N2 = (moment_B_from_forces + moment_B_from_distributed_loads - N1 * (2*a)) / (sin_alpha * (2*a))
-    
-    results['N2'] = N2
-    results['N2_tension'] = N2 > 0
-    
-    # Step 4: Support reactions at B
-    # Calculate from global equilibrium
-    sum_vertical_forces = sum(force['value'] * force.get('direction', [0, -1])[1] for force in forces)
-    sum_distributed_loads = sum_distributed_q1 + sum(load['value'] * (2*a) for load in distributed_loads if load['type'] == 'q2')
-
-    # Horizontal equilibrium: Xa + Xb + N2 * cos_alpha = 0
-    Xb = -results['Xa'] - N2 * cos_alpha
-    results['Xb'] = Xb
-
-    # Vertical equilibrium: Ya + Yb + sum of vertical forces - N2 * sin_alpha + sum of distributed loads = 0
-    Yb = -Ya - sum_vertical_forces + N2 * sin_alpha + sum_distributed_loads
-    results['Yb'] = Yb
-    
-    # Step 5: Bar cross-section areas and diameters (same as before)
-    A1_m2 = abs(N1 * 1000) / (R * 1e6)  # m²
-    A2_m2 = abs(N2 * 1000) / (R * 1e6)  # m²
-    
-    A1_cm2 = A1_m2 * 10000  # cm²
-    A2_cm2 = A2_m2 * 10000  # cm²
-    
-    d1 = np.sqrt(4 * A1_cm2 / np.pi)  # cm
-    d2 = np.sqrt(4 * A2_cm2 / np.pi)  # cm
-    
-    results['A1_cm2'] = A1_cm2
-    results['A2_cm2'] = A2_cm2
-    results['d1'] = d1
-    results['d2'] = d2
-    
-    # Step 6: Stiffness check (same as before)
-    delta_l1 = (N1 * 1000 * l1) / (E * 1e9 * A1_m2)  # m
-    delta_l2 = (N2 * 1000 * l2) / (E * 1e9 * A2_m2)  # m
-    
-    # Convert to mm for display
-    delta_l1_mm = delta_l1 * 1000
-    delta_l2_mm = delta_l2 * 1000
-    
-    results['delta_l1'] = delta_l1_mm
-    results['delta_l2'] = delta_l2_mm
-    
-    # Maximum displacement at point C
-    delta_C = np.sqrt(delta_l1_mm**2 + (delta_l2_mm * sin_alpha)**2)
-    results['delta_C'] = delta_C
-    
-    return results
-
-def calculate_optimal_diameters(N1, N2, l1, l2, sin_alpha, E, R, allowable_disp):
-    """
-    Calculate optimal bar diameters that satisfy both strength and stiffness requirements
-    
-    Parameters:
-    - N1, N2: Forces in bars (kN)
-    - l1, l2: Lengths of bars (m)
-    - sin_alpha: Sine of angle between bar 2 and horizontal
-    - E: Young's modulus (GPa)
-    - R: Design resistance (MPa)
-    - allowable_disp: Allowable displacement (mm)
-    
-    Returns:
-    - Dictionary containing optimal diameters and areas for both bars
-    """
-    # Step 1: Calculate minimum diameters based on strength requirements
-    A1_m2_min = abs(N1 * 1000) / (R * 1e6)  # m²
-    A2_m2_min = abs(N2 * 1000) / (R * 1e6)  # m²
-    
-    # Convert to cm² for easier handling
-    A1_min = A1_m2_min * 10000  # cm²
-    A2_min = A2_m2_min * 10000  # cm²
-    
-    # Calculate minimum diameters
-    d1_min = np.sqrt(4 * A1_min / np.pi)  # cm
-    d2_min = np.sqrt(4 * A2_min / np.pi)  # cm
-    
-    # Step 2: Check if minimum diameters meet stiffness requirement
-    delta_l1 = (N1 * 1000 * l1) / (E * 1e9 * A1_m2_min)  # m
-    delta_l2 = (N2 * 1000 * l2) / (E * 1e9 * A2_m2_min)  # m
-    
-    # Convert to mm for consistency
-    delta_l1_mm = delta_l1 * 1000
-    delta_l2_mm = delta_l2 * 1000
-    
-    # Calculate maximum displacement at point C with minimum areas
-    delta_C = np.sqrt(delta_l1_mm**2 + (delta_l2_mm * sin_alpha)**2)
-    
-    # Step 3: If displacement exceeds allowable, optimize diameters
-    if delta_C <= allowable_disp:
-        # Strength requirements already satisfy stiffness
-        return {
-            "d1_optimal": d1_min,
-            "d2_optimal": d2_min,
-            "A1_optimal": A1_min,
-            "A2_optimal": A2_min,
-            "is_stiffness_critical": False,
-            "delta_C": delta_C,
-            "material_volume": A1_min * l1 * 0.01 + A2_min * l2 * 0.01  # in liters
-        }
-    
-    # Step 4: Implement optimization strategy based on displacement contribution analysis
-    # Calculate contribution of each bar to total displacement
-    contrib1 = delta_l1_mm**2 / delta_C**2
-    contrib2 = (delta_l2_mm * sin_alpha)**2 / delta_C**2
-    
-    # Calculate scaling factors needed for each bar individually
-    k1 = delta_C / allowable_disp if contrib1 > 0 else 1.0
-    k2 = delta_C / allowable_disp if contrib2 > 0 else 1.0
-    
-    # Option 1: Scale both bars proportionally (baseline)
-    scale_both = delta_C / allowable_disp
-    d1_both = d1_min * np.sqrt(scale_both)
-    d2_both = d2_min * np.sqrt(scale_both)
-    A1_both = np.pi * (d1_both/2)**2
-    A2_both = np.pi * (d2_both/2)**2
-    vol_both = A1_both * l1 * 0.01 + A2_both * l2 * 0.01  # in liters
-    
-    # Option 2: Scale bar 1 only
-    scale1 = k1 * delta_C / allowable_disp
-    d1_only = d1_min * np.sqrt(scale1)
-    A1_only = np.pi * (d1_only/2)**2
-    
-    # Check if this configuration meets the displacement constraint
-    delta_l1_new = delta_l1_mm / scale1
-    delta_C_new = np.sqrt(delta_l1_new**2 + (delta_l2_mm * sin_alpha)**2)
-    
-    if delta_C_new <= allowable_disp:
-        vol_option2 = A1_only * l1 * 0.01 + A2_min * l2 * 0.01
-    else:
-        # If scaling bar 1 alone isn't sufficient, this option is invalid
-        vol_option2 = float('inf')
-    
-    # Option 3: Scale bar 2 only
-    scale2 = k2 * delta_C / allowable_disp
-    d2_only = d2_min * np.sqrt(scale2)
-    A2_only = np.pi * (d2_only/2)**2
-    
-    # Check if this configuration meets the displacement constraint
-    delta_l2_new = delta_l2_mm / scale2
-    delta_C_new = np.sqrt(delta_l1_mm**2 + (delta_l2_new * sin_alpha)**2)
-    
-    if delta_C_new <= allowable_disp:
-        vol_option3 = A1_min * l1 * 0.01 + A2_only * l2 * 0.01
-    else:
-        # If scaling bar 2 alone isn't sufficient, this option is invalid
-        vol_option3 = float('inf')
-    
-    # Option 4: Weighted scaling based on contribution
-    total_contrib = contrib1 + contrib2
-    weight1 = contrib1 / total_contrib if total_contrib > 0 else 0.5
-    weight2 = contrib2 / total_contrib if total_contrib > 0 else 0.5
-    
-    scale_factor = delta_C / allowable_disp
-    
-    # Apply weighted scaling, with higher scale to the bar that contributes more
-    d1_weighted = d1_min * np.sqrt(1 + (scale_factor - 1) * weight1 * 1.5)
-    d2_weighted = d2_min * np.sqrt(1 + (scale_factor - 1) * weight2 * 1.5)
-    
-    A1_weighted = np.pi * (d1_weighted/2)**2
-    A2_weighted = np.pi * (d2_weighted/2)**2
-    
-    # Verify this approach meets the displacement constraint
-    delta_l1_weighted = delta_l1_mm * (A1_min / A1_weighted)
-    delta_l2_weighted = delta_l2_mm * (A2_min / A2_weighted)
-    delta_C_weighted = np.sqrt(delta_l1_weighted**2 + (delta_l2_weighted * sin_alpha)**2)
-    
-    if delta_C_weighted <= allowable_disp:
-        vol_option4 = A1_weighted * l1 * 0.01 + A2_weighted * l2 * 0.01
-    else:
-        # Apply additional scaling to ensure constraint is met
-        extra_scale = delta_C_weighted / allowable_disp
-        d1_weighted *= np.sqrt(extra_scale)
-        d2_weighted *= np.sqrt(extra_scale)
-        A1_weighted = np.pi * (d1_weighted/2)**2
-        A2_weighted = np.pi * (d2_weighted/2)**2
-        vol_option4 = A1_weighted * l1 * 0.01 + A2_weighted * l2 * 0.01
-    
-    # Choose the option with minimum material volume
-    volumes = [vol_both, vol_option2, vol_option3, vol_option4]
-    min_index = np.argmin(volumes)
-    
-    if min_index == 0:  # Proportional scaling
-        return {
-            "d1_optimal": d1_both,
-            "d2_optimal": d2_both,
-            "A1_optimal": A1_both,
-            "A2_optimal": A2_both,
-            "is_stiffness_critical": True,
-            "delta_C": allowable_disp,
-            "material_volume": vol_both,
-            "optimization_method": "Proportional scaling of both bars"
-        }
-    elif min_index == 1:  # Scale bar 1 only
-        return {
-            "d1_optimal": d1_only,
-            "d2_optimal": d2_min,
-            "A1_optimal": A1_only,
-            "A2_optimal": A2_min,
-            "is_stiffness_critical": True,
-            "delta_C": allowable_disp,
-            "material_volume": vol_option2,
-            "optimization_method": "Scaling bar 1 only"
-        }
-    elif min_index == 2:  # Scale bar 2 only
-        return {
-            "d1_optimal": d1_min,
-            "d2_optimal": d2_only,
-            "A1_optimal": A1_min,
-            "A2_optimal": A2_only,
-            "is_stiffness_critical": True,
-            "delta_C": allowable_disp,
-            "material_volume": vol_option3,
-            "optimization_method": "Scaling bar 2 only"
-        }
-    else:  # Weighted scaling
-        return {
-            "d1_optimal": d1_weighted,
-            "d2_optimal": d2_weighted,
-            "A1_optimal": A1_weighted,
-            "A2_optimal": A2_weighted,
-            "is_stiffness_critical": True,
-            "delta_C": allowable_disp,
-            "material_volume": vol_option4,
-            "optimization_method": "Weighted scaling based on displacement contribution"
-        }
-
-def draw_bar_system_with_multiple_loads(a, b, forces, distributed_loads, N1, N2, disp_scale, d1, d2):
-    """Draw the bar system with deformation visualization and multiple loads"""
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    # Calculate node positions
-    A_x, A_y = 0, 0
-    B_x, B_y = 2*a, 0
-    C_x, C_y = 0, 2*b
-    D_x, D_y = 2*a, b
-    
-    # Calculate bar properties
-    l1 = np.sqrt((D_x - C_x)**2 + (D_y - C_y)**2)
-    l2 = np.sqrt((D_x - A_x)**2 + (D_y - A_y)**2)
-    
-    sin_alpha = b / l2
-    cos_alpha = 2*a / l2
-    
-    # Calculate bar elongations
-    E = 210  # GPa
-    A1 = np.pi * (d1/2)**2  # cm²
-    A2 = np.pi * (d2/2)**2  # cm²
-    
-    delta_l1 = (N1 * 1000 * l1) / (E * 1e9 * A1 * 1e-4) * 1000  # mm
-    delta_l2 = (N2 * 1000 * l2) / (E * 1e9 * A2 * 1e-4) * 1000  # mm
-    
-    # Scale for visualization
-    delta_l1_scaled = delta_l1 * disp_scale / 1000  # m
-    delta_l2_scaled = delta_l2 * disp_scale / 1000  # m
-    
-    # Calculate deformed positions
-    dx_C = 0
-    dy_C = delta_l1_scaled if N1 > 0 else -delta_l1_scaled
-    
-    dx_D = delta_l2_scaled * cos_alpha if N2 > 0 else -delta_l2_scaled * cos_alpha
-    dy_D = delta_l2_scaled * sin_alpha if N2 > 0 else -delta_l2_scaled * sin_alpha
-    
-    C_x_def, C_y_def = C_x + dx_C, C_y + dy_C
-    D_x_def, D_y_def = D_x + dx_D, D_y + dy_D
-    
-    # Draw undeformed system (solid lines)
-    ax.plot([A_x, C_x], [A_y, C_y], 'k-', linewidth=2)
-    ax.plot([C_x, D_x], [C_y, D_y], 'r-', linewidth=max(1, d1/10), label='Bar 1')
-    ax.plot([D_x, B_x], [D_y, B_y], 'k-', linewidth=2)
-    ax.plot([A_x, D_x], [A_y, D_y], 'b-', linewidth=max(1, d2/10), label='Bar 2')
-    
-    # Draw deformed system (dashed lines)
-    ax.plot([A_x, C_x_def], [A_y, C_y_def], 'k--', linewidth=1)
-    ax.plot([C_x_def, D_x_def], [C_y_def, D_y_def], 'r--', linewidth=1)
-    ax.plot([D_x_def, B_x], [D_y_def, B_y], 'k--', linewidth=1)
-    ax.plot([A_x, D_x_def], [A_y, D_y_def], 'b--', linewidth=1)
-    
-    # Draw multiple forces with custom directions
-    arrow_length = 0.2 * max(a, b)
-    for i, force in enumerate(forces):
-        x_pos = force['x_pos']
-        y_pos = force['y_pos']
-        value = force['value']
-        direction = force.get('direction', [0, -1])  # Default downward if not specified
-        
-        # Calculate arrow components
-        dx = direction[0] * arrow_length
-        dy = direction[1] * arrow_length
-        
-        # Draw arrow in the specified direction
-        ax.arrow(x_pos, y_pos, dx, dy, head_width=0.05*max(a, b),
-                head_length=0.05*max(a, b), fc='g', ec='g', width=0.02*max(a, b))
-        
-        # Position the text label based on arrow direction to avoid overlap
-        text_offset_x = 0.1*a if direction[0] <= 0 else -0.3*a
-        text_offset_y = 0.1*b if direction[1] <= 0 else -0.3*b
-        
-        # Add direction indicator to label
-        direction_str = ""
-        if direction[0] == 0 and direction[1] == -1:
-            direction_str = "↓"
-        elif direction[0] == 0 and direction[1] == 1:
-            direction_str = "↑"
-        elif direction[0] == 1 and direction[1] == 0:
-            direction_str = "→"
-        elif direction[0] == -1 and direction[1] == 0:
-            direction_str = "←"
-        
-        ax.text(x_pos+text_offset_x, y_pos+text_offset_y, 
-               f'F{i+1}={value} kN {direction_str}', fontsize=10)
-    
-    # Draw distributed loads
-    q_scale = 0.15 * max(a, b)
-    for i, load in enumerate(distributed_loads):
-        value = load['value']
-        
-        if load['type'] == 'q1':  # Load on CD segment
-            start_x, start_y = C_x, C_y
-            end_x, end_y = D_x, D_y
-        else:  # q2, load on DB segment
-            start_x, start_y = D_x, D_y
-            end_x, end_y = B_x, B_y
-        
-        # Draw 5 arrows to represent the distributed load
-        for j in range(5):
-            x = start_x + j*(end_x-start_x)/4
-            y = start_y + j*(end_y-start_y)/4
-            ax.arrow(x, y, 0, -q_scale, head_width=0.03*max(a, b),
-                    head_length=0.03*max(a, b), fc='g', ec='g', width=0.01*max(a, b))
-        
-        # Add label
-        mid_x = (start_x + end_x) / 2
-        mid_y = (start_y + end_y) / 2
-        ax.text(mid_x, mid_y-q_scale, f'q{i+1}={value} kN/m', fontsize=10)
-    
-    # Support symbols
-    rect_size = 0.1 * max(a, b)
-    # Fixed support at A
-    ax.add_patch(Rectangle((A_x-rect_size/2, A_y-rect_size),
-                          rect_size, rect_size, fc='gray', ec='black'))
-    
-    # Roller support at B
-    circle_radius = rect_size/2
-    ax.add_patch(Circle((B_x, B_y-circle_radius),
-                        circle_radius, fc='gray', ec='black'))
-    
-    # Labels
-    ax.text(A_x-0.15*a, A_y+0.15*b, 'A', fontsize=12)
-    ax.text(B_x+0.15*a, B_y+0.15*b, 'B', fontsize=12)
-    ax.text(C_x-0.15*a, C_y+0.15*b, 'C', fontsize=12)
-    ax.text(D_x+0.15*a, D_y+0.15*b, 'D', fontsize=12)
-    
-    # Forces labels
-    if N1 > 0:
-        ax.text((C_x+D_x)/2+0.1*a, (C_y+D_y)/2+0.1*b, f'N1={N1:.2f} kN (T)', color='red', fontsize=10)
-    else:
-        ax.text((C_x+D_x)/2+0.1*a, (C_y+D_y)/2+0.1*b, f'N1={abs(N1):.2f} kN (C)', color='red', fontsize=10)
-        
-    if N2 > 0:
-        ax.text((A_x+D_x)/2+0.1*a, (A_y+D_y)/2-0.1*b, f'N2={N2:.2f} kN (T)', color='blue', fontsize=10)
-    else:
-        ax.text((A_x+D_x)/2+0.1*a, (A_y+D_y)/2-0.1*b, f'N2={abs(N2):.2f} kN (C)', color='blue', fontsize=10)
-    
-    # Add legend and labels
-    ax.legend(loc='upper right')
-    ax.set_xlabel('x [m]')
-    ax.set_ylabel('y [m]')
-    ax.set_title('Bar System - Deformation Scale: ' + str(disp_scale) + 'x')
-    
-    # Set axis limits with margins
-    margin = 0.5 * max(a, b)
-    ax.set_xlim(min(A_x, C_x)-margin, max(B_x, D_x)+margin)
-    ax.set_ylim(min(A_y, B_y)-margin-q_scale, max(C_y, D_y)+margin)
-    
-    # Equal aspect ratio
-    ax.set_aspect('equal')
-    ax.grid(True)
-    
-    return fig
+# Import functions from utility modules
+from vizualizations.visualization import draw_bar_system_with_multiple_loads
+from vizualizations.visualization_3d import create_3d_bar_system
+from utils.calculations import calculate_bar_system
+from utils.optimization import calculate_optimal_diameters
 
 def main():
     st.title("Bar System Analysis")
@@ -623,7 +159,7 @@ def main():
             })
             st.experimental_rerun()
     
-    # Calculate results with the updated functions
+    # Calculate results using the imported function
     results = calculate_bar_system(a, b, st.session_state.forces, st.session_state.distributed_loads, E, R, allowable_disp)
     
     # Update the rest of the tabs to use the new calculation results
@@ -635,7 +171,7 @@ def main():
         and distributed loads as defined in the Load Configuration tab.
         """)
         
-        # Display initial visualization with multiple loads
+        # Display initial visualization with multiple loads using imported function
         disp_scale_initial = 10
         fig = draw_bar_system_with_multiple_loads(
             a, b, 
@@ -661,9 +197,6 @@ def main():
             st.markdown(f"- E = {E} GPa")
             st.markdown(f"- R = {R} MPa")
             st.markdown(f"- Allowable displacement = {allowable_disp} mm")
-
-    # Continue with the remaining tabs similar to the original implementation
-    # but update to use the new calculation results and visualization
 
     with tabs[2]:
         st.markdown("## Calculation Steps")
@@ -874,34 +407,47 @@ def main():
         
         # Slider for deformation scale
         disp_scale = st.slider("Deformation Scale Factor:", min_value=1, max_value=100, value=10, key="deformation_scale_slider")
+
+        viz_tabs = st.tabs(["2D View", "3D View"])
+
+        with viz_tabs[0]:
+            st.markdown("### 2D View")
+            # Display the bar system with the selected scale and multiple loads using imported function
+            fig = draw_bar_system_with_multiple_loads(
+                a, b, 
+                st.session_state.forces, 
+                st.session_state.distributed_loads,
+                results['N1'], results['N2'], 
+                disp_scale, 
+                results['d1'], results['d2']
+            )
+            st.pyplot(fig)
         
-        # Draw the bar system with the selected scale and multiple loads
-        fig = draw_bar_system_with_multiple_loads(
-            a, b, 
-            st.session_state.forces, 
-            st.session_state.distributed_loads,
-            results['N1'], results['N2'], 
-            disp_scale, 
-            results['d1'], results['d2']
-        )
-        st.pyplot(fig)
-        
-        # Display displacement values
+        # Display displacement values with both actual and scaled values
         st.markdown("### Deformation Values")
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"- Elongation of Bar 1: {results['delta_l1']:.2f} mm")
             st.markdown(f"- Elongation of Bar 2: {results['delta_l2']:.2f} mm")
         with col2:
-            st.markdown(f"- Displacement at Point C: {results['delta_C']:.2f} mm")
+            # Show both actual and scaled displacement values
+            scaled_delta_C = results['delta_C'] * disp_scale
+            st.markdown(f"- Actual Displacement at Point C: {results['delta_C']:.2f} mm")
+            st.markdown(f"- Scaled Displacement at Point C: {scaled_delta_C:.2f} mm (×{disp_scale})")
+            
+            # Keep the original check against allowable displacement using actual value
             if results['delta_C'] <= allowable_disp:
                 st.success(f"Within allowable limit ({allowable_disp} mm)")
             else:
                 st.error(f"Exceeds allowable limit ({allowable_disp} mm)")
         
-        # Optimization section
+        # Add a note about the scaled visualization
+        st.info(f"The visualization shows deformations scaled by {disp_scale}× for better visibility.")
+        
+        # Optimization section using imported function
         st.markdown("### Bar Diameter Optimization")
         if st.button("Calculate Optimal Bar Diameters"):
+            # Use actual values for optimization
             optimal = calculate_optimal_diameters(
                 results['N1'], results['N2'], 
                 results['l1'], results['l2'], 
@@ -912,24 +458,33 @@ def main():
             # Material volume reduction percentage
             current_volume = results['A1_cm2'] * results['l1'] * 0.01 + results['A2_cm2'] * results['l2'] * 0.01  # liters
             
-            # Create comparison table
+            # Calculate scaled displacement for display
+            scaled_delta_C = optimal['delta_C'] * disp_scale
+            
+            # Create comparison table with both actual and scaled displacement
             comparison_data = {
                 "Parameter": ["Diameter Bar 1 (cm)", "Diameter Bar 2 (cm)", 
                               "Area Bar 1 (cm²)", "Area Bar 2 (cm²)",
-                              "Material Volume (L)"],
+                              "Material Volume (L)",
+                              "Actual Displacement (mm)",
+                              f"Scaled Displacement ×{disp_scale} (mm)"],
                 "Current Design": [
                     f"{results['d1']:.2f}", 
                     f"{results['d2']:.2f}", 
                     f"{results['A1_cm2']:.2f}", 
                     f"{results['A2_cm2']:.2f}",
-                    f"{current_volume:.2f}"
+                    f"{current_volume:.2f}",
+                    f"{results['delta_C']:.2f}",
+                    f"{results['delta_C'] * disp_scale:.2f}"
                 ],
                 "Optimal Design": [
                     f"{optimal['d1_optimal']:.2f}", 
                     f"{optimal['d2_optimal']:.2f}", 
                     f"{optimal['A1_optimal']:.2f}", 
                     f"{optimal['A2_optimal']:.2f}",
-                    f"{optimal['material_volume']:.2f}"
+                    f"{optimal['material_volume']:.2f}",
+                    f"{optimal['delta_C']:.2f}",
+                    f"{scaled_delta_C:.2f}"
                 ]
             }
             st.table(pd.DataFrame(comparison_data))
