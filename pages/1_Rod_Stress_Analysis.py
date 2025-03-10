@@ -2,10 +2,8 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
-from typing import List, Dict, Union, Optional
+from typing import List, Dict
 import pandas as pd
-import os
-import io
 import sys
 import pathlib
 
@@ -648,7 +646,7 @@ def main():
         if not forces:
             st.error("Cannot analyze rod without any forces. Please add at least one force.")
         else:
-            analyze_rod()
+            analyze_rod(area_a, area_b, area_c, length_a, length_b, length_c, E, forces)
     
     # Engineering Concepts Dictionary
     if tooltips_available and ENGINEERING_TOOLTIPS:
@@ -716,30 +714,37 @@ def main():
             - Visualization plots
             """)
 
-def analyze_rod():
+def analyze_rod(area_a, area_b, area_c, length_a, length_b, length_c, E, forces):
+    # Get the current rod and force data from sidebar inputs
+    sections = [
+        Section(area=area_a, length=length_a, position=0),
+        Section(area=area_b, length=length_b, position=length_a),
+        Section(area=area_c, length=length_c, position=length_a + length_b)
+    ]
+    
     try:
         # Initialize progress
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # Step 1
-        status_text.text("Calculating forces...")
-        # Force calculations
+        # Step 1: Create rod and initialize
+        status_text.text("Initializing rod model...")
+        rod = SteppedRod(sections=sections, E=E)
         progress_bar.progress(25)
         
-        # Step 2
-        status_text.text("Computing stresses...")
-        # Stress calculations  
+        # Step 2: Analyze forces and stresses
+        status_text.text("Computing forces and stresses...")
+        results = rod.analyze(forces=forces)
         progress_bar.progress(50)
         
-        # Step 3
+        # Step 3: Generate visualization
         status_text.text("Generating visualization...")
-        # Create visualizations
+        fig = rod.create_plots(results)
+        st.pyplot(fig)
         progress_bar.progress(75)
         
-        # Step 4
+        # Step 4: Finalize and display results
         status_text.text("Finalizing results...")
-        # Final calculations and display
         progress_bar.progress(100)
         status_text.text("Complete!")
         
