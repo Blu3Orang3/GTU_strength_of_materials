@@ -1,14 +1,13 @@
 # Core framework
-streamlit==1.31.0  # Modern version compatible with Python 3.12
+streamlit==1.31.0  # Modern version compatible with Python 3.10-3.12
 
 # Data processing and visualization
-numpy>=1.26.0  # Python 3.12 compatible version
+numpy>=1.26.0  # Python 3.10+ compatible version
 pandas>=2.0.3,<2.1.0  # Stable version for data handling
 matplotlib>=3.7.2,<3.8.0  # For 2D plots, stress diagrams
-plotly>=5.13.0  # Required for 3D visualization (used in visualization_3d.py)
+plotly>=5.13.0  # Required for 3D visualization (visualization_3d.py uses plotly.graph_objects)
 
 # Image processing
-pillow>=10.0.0  # For image handling, compatible with Python 3.12
+pillow>=10.0.0  # For image handling in Streamlit components
 
-# Other utilities
-uuid>=1.30  # Used for generating unique IDs for forces and distributed loads
+# Note: uuid is a built-in Python module and doesn't need to be in requirements.txt
