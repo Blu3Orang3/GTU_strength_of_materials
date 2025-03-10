@@ -414,12 +414,14 @@ def main():
             st.markdown("### 2D View")
             # Display the bar system with the selected scale and multiple loads using imported function
             fig = draw_bar_system_with_multiple_loads(
-                a, b, 
-                st.session_state.forces, 
-                st.session_state.distributed_loads,
-                results['N1'], results['N2'], 
-                disp_scale, 
-                results['d1'], results['d2']
+            a, b, 
+            st.session_state.forces, 
+            st.session_state.distributed_loads,
+            results['N1'], results['N2'], 
+            disp_scale, 
+            results['d1'], results['d2'],
+            results['delta_l1'], results['delta_l2'],  # Add these parameters
+            results['sin_alpha']  # Add this parameter
             )
             st.pyplot(fig)
         
