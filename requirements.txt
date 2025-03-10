@@ -1,5 +1,14 @@
-streamlit==1.31.0  # Update to a newer version compatible with Python 3.12
-numpy>=1.26.0  # Correct, this version supports Python 3.12
-pandas>=2.0.3,<2.1.0  # Specify a compatible version 
-matplotlib>=3.7.2,<3.8.0  # Update matplotlib
-pillow>=10.0.0  # Add explicit pillow version that has wheels for Python 3.12
+# Core framework
+streamlit==1.31.0  # Modern version compatible with Python 3.12
+
+# Data processing and visualization
+numpy>=1.26.0  # Python 3.12 compatible version
+pandas>=2.0.3,<2.1.0  # Stable version for data handling
+matplotlib>=3.7.2,<3.8.0  # For 2D plots, stress diagrams
+plotly>=5.13.0  # Required for 3D visualization (used in visualization_3d.py)
+
+# Image processing
+pillow>=10.0.0  # For image handling, compatible with Python 3.12
+
+# Other utilities
+uuid>=1.30  # Used for generating unique IDs for forces and distributed loads
