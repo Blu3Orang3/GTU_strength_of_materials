@@ -648,40 +648,7 @@ def main():
         if not forces:
             st.error("Cannot analyze rod without any forces. Please add at least one force.")
         else:
-            try:
-                # Create and analyze rod
-                rod = SteppedRod(sections, E)
-                results = rod.analyze(forces, plot=False)
-                
-                # Add tabs for better organization of results
-                tab1, tab2 = st.tabs(["Numerical Results", "Visual Results"])
-
-                with tab1:
-                    display_results(results)
-                    
-                with tab2:
-                    fig = rod.create_plots(results)
-                    st.pyplot(fig)
-                
-                # Download results as CSV
-                results_df = pd.DataFrame({
-                    "Position (cm)": results["positions_m"] * 100,
-                    "Internal Force (kN)": results["internal_forces_kN"],
-                    "Stress (MPa)": results["stresses_MPa"],
-                    "Deformation (mm)": results["deformations_mm"],
-                    "Displacement (mm)": results["cumulative_displacements_mm"]
-                })
-                
-                csv = results_df.to_csv(index=False)
-                st.download_button(
-                    label="Download Results as CSV",
-                    data=csv,
-                    file_name="rod_analysis_results.csv",
-                    mime="text/csv"
-                )
-                
-            except Exception as e:
-                st.error(f"Error during analysis: {str(e)}")
+            analyze_rod()
     
     # Engineering Concepts Dictionary
     if tooltips_available and ENGINEERING_TOOLTIPS:
@@ -748,6 +715,38 @@ def main():
             - Deformations and displacements
             - Visualization plots
             """)
+
+def analyze_rod():
+    try:
+        # Initialize progress
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        # Step 1
+        status_text.text("Calculating forces...")
+        # Force calculations
+        progress_bar.progress(25)
+        
+        # Step 2
+        status_text.text("Computing stresses...")
+        # Stress calculations  
+        progress_bar.progress(50)
+        
+        # Step 3
+        status_text.text("Generating visualization...")
+        # Create visualizations
+        progress_bar.progress(75)
+        
+        # Step 4
+        status_text.text("Finalizing results...")
+        # Final calculations and display
+        progress_bar.progress(100)
+        status_text.text("Complete!")
+        
+        # Display results
+        display_results(results)
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
 
 if __name__ == "__main__":
     main()

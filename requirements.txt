@@ -10,4 +10,7 @@ plotly>=5.13.0  # Required for 3D visualization (visualization_3d.py uses plotly
 # Image processing
 pillow>=10.0.0  # For image handling in Streamlit components
 
+# Resource monitoring
+psutil>=5.9.0  # For resource monitoring
+
 # Note: uuid is a built-in Python module and doesn't need to be in requirements.txt
